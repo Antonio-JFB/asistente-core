@@ -37,9 +37,10 @@ def _nombre_de(dato) -> str | None:
 def _usuario(request: Request) -> str:
     """Quién consulta, para el límite diario: el usuario de la sesión del dashboard (JWT en
     `request.state.user` o cookie de sesión de Starlette en `request.session`) o, si no hay, la IP."""
-    nombre = _nombre_de(getattr(request.state, "user", None))
-    if nombre:
-        return nombre
+    for atributo in ("user", "session"):          # request.state.user / request.state.session (claims del JWT)
+        nombre = _nombre_de(getattr(request.state, atributo, None))
+        if nombre:
+            return nombre
     try:
         nombre = _nombre_de(request.session.get("user"))   # falla si la app no usa SessionMiddleware
     except Exception:

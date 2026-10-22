@@ -384,7 +384,8 @@ def test_el_usuario_para_los_limites_sale_de_la_sesion_o_del_jwt():
     jwt = SimpleNamespace(state=SimpleNamespace(user={"sub": "ana"}), client=cliente)
     sesion = SimpleNamespace(state=SimpleNamespace(), session={"user": {"user": "luis", "name": "Luis"}}, client=cliente)
     nada = SimpleNamespace(state=SimpleNamespace(), client=cliente)          # sin sesión: cae a la IP
-    assert (_usuario(jwt), _usuario(sesion), _usuario(nada)) == ("ana", "luis", "9.9.9.9")
+    jwt_en_session = SimpleNamespace(state=SimpleNamespace(session={"sub": "marta"}), client=cliente)
+    assert (_usuario(jwt), _usuario(sesion), _usuario(nada), _usuario(jwt_en_session)) == ("ana", "luis", "9.9.9.9", "marta")
 
 
 if __name__ == "__main__":
