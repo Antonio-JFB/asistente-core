@@ -131,8 +131,14 @@
     pintarMensaje(rol, texto, chartSpec, tabla, reporteHtml);
   }
 
-  function abrirReporte(htmlReporte) {
-    const blob = new Blob([htmlReporte], { type: "text/html" });
+  // paraPdf: abre el reporte y lanza el diálogo de impresión del navegador (ahí se elige "Guardar como PDF").
+  // Se espera a que carguen las gráficas antes de imprimir.
+  function abrirReporte(htmlReporte, paraPdf) {
+    const html = paraPdf
+      ? htmlReporte.replace("</body>",
+          "<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},2500)})<\/script></body>")
+      : htmlReporte;
+    const blob = new Blob([html], { type: "text/html" });
     window.open(URL.createObjectURL(blob), "_blank");
   }
 
@@ -180,8 +186,18 @@
         background: "#0f172a", color: "#fff", border: "0", borderRadius: "6px",
         fontSize: ".78rem", cursor: "pointer",
       });
-      boton.onclick = () => abrirReporte(reporteHtml);
+      boton.onclick = () => abrirReporte(reporteHtml, false);
       cont.appendChild(boton);
+
+      const botonPdf = document.createElement("button");
+      botonPdf.textContent = "⬇ Descargar PDF";
+      Object.assign(botonPdf.style, {
+        display: "block", margin: ".4rem 0", padding: ".4rem .7rem",
+        background: "#1d4ed8", color: "#fff", border: "0", borderRadius: "6px",
+        fontSize: ".78rem", cursor: "pointer",
+      });
+      botonPdf.onclick = () => abrirReporte(reporteHtml, true);
+      cont.appendChild(botonPdf);
     }
 
     cont.scrollTop = cont.scrollHeight;
