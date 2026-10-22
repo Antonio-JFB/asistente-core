@@ -25,13 +25,27 @@ def _reemplazar_ultima_respuesta(historial, texto):
         historial[-1]["content"] = texto
 
 
-def _usuario(request: Request) -> str:
-    """Quién consulta, para el límite diario: dato de la sesión del dashboard o, si no hay, la IP."""
-    claims = getattr(request.state, "user", None)
-    if isinstance(claims, dict):
+def _nombre_de(dato) -> str | None:
+    if isinstance(dato, dict):
         for campo in ("sub", "email", "username", "user", "user_id", "uid"):
-            if claims.get(campo):
-                return str(claims[campo])
+            if dato.get(campo):
+                return str(dato[campo])
+        return None
+    return str(dato) if dato else None
+
+
+def _usuario(request: Request) -> str:
+    """Quién consulta, para el límite diario: el usuario de la sesión del dashboard (JWT en
+    `request.state.user` o cookie de sesión de Starlette en `request.session`) o, si no hay, la IP."""
+    nombre = _nombre_de(getattr(request.state, "user", None))
+    if nombre:
+        return nombre
+    try:
+        nombre = _nombre_de(request.session.get("user"))   # falla si la app no usa SessionMiddleware
+    except Exception:
+        nombre = None
+    if nombre:
+        return nombre
     return request.client.host if request.client else "desconocido"
 
 

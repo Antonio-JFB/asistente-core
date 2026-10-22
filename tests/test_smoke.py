@@ -377,6 +377,16 @@ def test_redactor_con_claude_usa_su_variable_y_reporta_el_costo():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
 
+def test_el_usuario_para_los_limites_sale_de_la_sesion_o_del_jwt():
+    from types import SimpleNamespace
+    from asistente_core.router import _usuario
+    cliente = SimpleNamespace(host="9.9.9.9")
+    jwt = SimpleNamespace(state=SimpleNamespace(user={"sub": "ana"}), client=cliente)
+    sesion = SimpleNamespace(state=SimpleNamespace(), session={"user": {"user": "luis", "name": "Luis"}}, client=cliente)
+    nada = SimpleNamespace(state=SimpleNamespace(), client=cliente)          # sin sesión: cae a la IP
+    assert (_usuario(jwt), _usuario(sesion), _usuario(nada)) == ("ana", "luis", "9.9.9.9")
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):
