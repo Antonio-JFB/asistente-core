@@ -119,7 +119,15 @@ _PLANTILLA = """<!doctype html>
   th, td {{ border: 1px solid #e2e8f0; padding: .4rem .6rem; text-align: left; }}
   th {{ background: #f1f5f9; }}
   .nota {{ font-size: .78rem; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 2rem; padding-top: 1rem; }}
-  @media print {{ body {{ margin: 0; }} .no-print {{ display: none; }} }}
+  /* Margen de página en 0 para que el navegador no imprima su encabezado y pie (fecha y dirección del
+     reporte); el margen real lo da el padding del cuerpo. */
+  @page {{ margin: 0; }}
+  @media print {{
+    body {{ margin: 0; max-width: none; padding: 16mm 18mm; }}
+    .no-print {{ display: none; }}
+    h2, h3 {{ break-after: avoid; }}
+    .chart, table, .kpis {{ break-inside: avoid; }}
+  }}
 </style>
 </head>
 <body>
