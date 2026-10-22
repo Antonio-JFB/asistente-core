@@ -388,6 +388,25 @@ def test_el_usuario_para_los_limites_sale_de_la_sesion_o_del_jwt():
     assert (_usuario(jwt), _usuario(sesion), _usuario(nada), _usuario(jwt_en_session)) == ("ana", "luis", "9.9.9.9", "marta")
 
 
+def test_un_dato_bloqueado_no_llega_al_modelo():
+    llamadas = []
+    original = llm.responder
+    llm.responder = lambda *a, **k: llamadas.append(1) or {"reply": "x", "historial": [], "tool_trace": []}
+    try:
+        app = FastAPI()
+        tk = _toolkit(nombre_app="App", patrones_bloqueados={"un RFC": r"\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b", "una clave catastral": r"(?<!\d)36\d{10}(?!\d)"})
+        app.include_router(crear_router(tk))
+        c = TestClient(app)
+        r = c.post("/asistente/chat", json={"mensaje": "dame el adeudo de mhe570101fi1"}).json()
+        assert "un RFC" in r["reply"] and not llamadas, "el RFC no debe enviarse al modelo"
+        r = c.post("/asistente/chat", json={"mensaje": "predio 360005151001"}).json()
+        assert "una clave catastral" in r["reply"] and not llamadas
+        c.post("/asistente/chat", json={"mensaje": "¿cuántos predios hay en 2026?"})
+        assert llamadas == [1], "una pregunta normal sí debe pasar"
+    finally:
+        llm.responder = original
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

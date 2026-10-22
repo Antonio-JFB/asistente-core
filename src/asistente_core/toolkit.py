@@ -13,7 +13,8 @@ Esta clase concentra la lógica que NO debe variar entre dashboards:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Callable
 
 _PLACEHOLDER_TABLA = (
@@ -87,6 +88,19 @@ class Toolkit:
     contexto_redactor: str = ""
     """Una o dos frases del dominio para el modelo redactor (ver redactor.py), por ejemplo qué
     miden los scores. Sin esto el redactor describe los datos con vocabulario genérico."""
+
+    patrones_bloqueados: dict[str, str] = field(default_factory=dict)
+    """nombre legible -> expresión regular. Si la pregunta del usuario coincide con alguna, NO se envía
+    al modelo (la pregunta viaja a la API del proveedor) y se le pide quitar ese dato. Sirve para que
+    nadie pegue por costumbre un RFC, una clave catastral o un correo en un chat que solo trabaja con
+    cifras agregadas."""
+
+    def dato_bloqueado(self, mensaje: str) -> str | None:
+        """Nombre del primer patrón que coincide con el mensaje, o None."""
+        for nombre, patron in self.patrones_bloqueados.items():
+            if re.search(patron, mensaje or "", re.IGNORECASE):
+                return nombre
+        return None
 
     def __post_init__(self):
         con_schema = {t["name"] for t in self.schemas}

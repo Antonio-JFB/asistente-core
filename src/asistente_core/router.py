@@ -87,6 +87,11 @@ def crear_router(
     # en otro hilo y las demás páginas siguen atendiéndose.
     @router.post("/chat")
     def chat(request: Request, payload: ChatRequest):
+        dato = toolkit.dato_bloqueado(payload.mensaje)
+        if dato:   # antes de gastar una consulta del límite y, sobre todo, antes de enviar nada al modelo
+            return _respuesta_simple(
+                f"Tu pregunta incluye {dato}, y por privacidad no la envío al modelo. Este asistente solo trabaja con "
+                "cifras agregadas: vuelve a preguntar sin ese dato.", payload.historial)
         usuario = _usuario(request)
         bloqueo = limites.revisar(usuario)
         if bloqueo:
