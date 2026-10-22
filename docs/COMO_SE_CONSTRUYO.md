@@ -273,16 +273,40 @@ GPU pasa de 80 °C y descarga del modelo al terminar.
 **Costos de usarlo:** unos 8 GB de VRAM, 21 a 28 segundos por reporte y un cambio de modelo en la
 tarjeta gráfica (el primer reporte tarda más). Se descarga de la memoria 1 minuto después de usarse.
 
+### 5.7 Cuarta ronda: primera prueba real con Claude y preparación para producción
+
+Hasta aquí todo se había medido con modelos locales. Con una llave de la API (se pidió una nueva porque
+la primera no pertenecía a un *workspace* y la API la rechazaba) se corrió la batería de 11 preguntas:
+
+| Configuración | Resultado | Costo por corrida |
+|---|---|---|
+| Claude solo | 10 de 11 preguntas 3/3; el reporte largo del padrón 0/3 por corto (497 a 536 palabras) | ≈ 1.3 a 1.6 ¢ por pregunta corta; ≈ 3 ¢ por reporte |
+| Claude + redactor Claude | **11 de 11, 3/3** | ≈ 5 ¢ por reporte largo |
+
+- El redactor con Claude (llamada aparte, sin herramientas, mismas instrucciones y contexto) da 961, 981 y
+  977 palabras, sin frases especulativas ni cifras fuera de los datos.
+- "Reporte de la colonia Centro", la limitación que `llama3.2` nunca superó (0 de 6), con Claude es 3 de 3.
+- Una pregunta de seguimiento sobre el historial funciona (se probó). El historial que viaja al navegador no
+  lleva los bloques de razonamiento del modelo, porque el redactor puede reescribir la respuesta.
+
+Cambios hechos para llevarlo a producción sin riesgo:
+- **Interruptor `ASISTENTE_ACTIVO`** (apagado por defecto): sin él no hay botón ni rutas.
+- **Topes** por persona y por día, y de gasto diario; **registro de tokens y costo** por consulta.
+- **Esfuerzo de razonamiento** fijado en `medium` (más barato) y `ASISTENTE_MODEL` vacío ya no rompe el modelo.
+- **Falla amable:** sin saldo o sin red el usuario no ve un error técnico.
+- Pruebas del paquete: de 18 a 24.
+
+Lo que aún no está medido: un periodo largo de uso real (el costo por pregunta es una estimación con una
+sola persona consultando) y el comportamiento con muchos usuarios a la vez.
+
 ## 6. Limitaciones que siguen abiertas
 
 1. **El reporte "de la colonia X" sale del padrón completo con `llama3.2`.** El modelo
    no pasa el nombre de la colonia a la herramienta: 0 de 6 veces, también con el
    prompt anterior (no es una regresión de este trabajo). Se probó hacer el
-   parámetro obligatorio: **no ayudó** (0 de 8) y se revirtió. Hay que probarlo con
-   un modelo mayor o con Claude.
-2. **Claude no se probó en esta etapa** (no había API key disponible). El código de su
-   proveedor cambió solo en cómo recibe el `Toolkit`, pero **no está comprobado de
-   punta a punta**. Hay que correr la batería con Claude antes de darlo por bueno.
+   parámetro obligatorio: **no ayudó** (0 de 8) y se revirtió. **Con Claude sí funciona** (3 de 3, sección 5.7).
+2. **Claude se probó solo en el dashboard de adeudos**, con una persona consultando (sección 5.7). Falta
+   medir el costo con uso real y en los demás dashboards.
 3. **Los modelos locales chicos son frágiles** (sección 5.2). Es una propiedad del
    modelo, no del paquete; por eso se agregó el script de medición.
 4. **Solo se probó en un dashboard.** La promesa "solo hay que escribir `tools.py`"

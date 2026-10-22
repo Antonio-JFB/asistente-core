@@ -6,8 +6,11 @@ Pruebas de humo del núcleo. No necesitan pytest ni conexión a ningún modelo:
 Cada prueba cubre algo que en algún momento falló de verdad al construir el
 asistente (ver docs/COMO_SE_CONSTRUYO.md).
 """
+import os
 import sys
 import traceback
+
+os.environ["ASISTENTE_ACTIVO"] = "1"   # el asistente viene apagado por defecto; las pruebas lo necesitan prendido
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,7 +18,10 @@ from fastapi.testclient import TestClient
 from asistente_core import (
     Toolkit, construir_instrucciones_reporte, construir_system_prompt, crear_router, llm, redactor,
 )
+from asistente_core.costos import costo_usd
 from asistente_core.informe import construir_reporte_html
+from asistente_core.limites import Limites
+from asistente_core.providers import anthropic_provider
 
 
 def _schema(nombre, **props):
@@ -89,7 +95,8 @@ class _ClienteFalso:
 
 def _con_redactor(cliente, modelo="gemma-falso"):
     import os
-    original = (redactor._cliente, os.environ.get("ASISTENTE_MODEL_REDACTOR_OLLAMA"))
+    original = (redactor._cliente, os.environ.get("ASISTENTE_MODEL_REDACTOR_OLLAMA"), os.environ.get("ASISTENTE_PROVIDER"))
+    os.environ["ASISTENTE_PROVIDER"] = "ollama"
     redactor._cliente = lambda: cliente
     if modelo is None:
         os.environ.pop("ASISTENTE_MODEL_REDACTOR_OLLAMA", None)
@@ -98,6 +105,10 @@ def _con_redactor(cliente, modelo="gemma-falso"):
 
     def restaurar():
         redactor._cliente = original[0]
+        if original[2] is None:
+            os.environ.pop("ASISTENTE_PROVIDER", None)
+        else:
+            os.environ["ASISTENTE_PROVIDER"] = original[2]
         if original[1] is None:
             os.environ.pop("ASISTENTE_MODEL_REDACTOR_OLLAMA", None)
         else:
@@ -272,6 +283,98 @@ def test_router_sin_reporte_no_agrega_html():
         assert "reporte_html" not in cuerpo and cuerpo["reply"] == "hola"
     finally:
         llm.responder = original
+
+
+def test_apagado_por_defecto_no_expone_ninguna_ruta():
+    anterior = os.environ.pop("ASISTENTE_ACTIVO")
+    try:
+        app = FastAPI()
+        app.include_router(crear_router(_toolkit(nombre_app="App")))
+        cliente = TestClient(app)
+        assert cliente.get("/asistente/asistente.js").status_code == 404
+        assert cliente.post("/asistente/chat", json={"mensaje": "hola"}).status_code == 404
+    finally:
+        os.environ["ASISTENTE_ACTIVO"] = anterior
+
+
+def test_costo_aproximado_por_modelo():
+    assert abs(costo_usd("claude-sonnet-5-5", 1_000_000, 1_000_000) - 12.0) < 1e-9
+    assert abs(costo_usd("claude-haiku-5-5", 10_000, 1_000) - 0.0015) < 1e-9
+    assert costo_usd("modelo-desconocido", 1000, 1000) is None
+
+
+def test_limite_diario_por_usuario_y_tope_de_gasto():
+    os.environ["ASISTENTE_LIMITE_USUARIO_DIA"] = "2"
+    os.environ["ASISTENTE_TOPE_DIARIO_USD"] = "1"
+    try:
+        lim = Limites()
+        assert lim.revisar("ana") is None and lim.revisar("ana") is None
+        assert "límite" in lim.revisar("ana")          # la tercera de ana se bloquea...
+        assert lim.revisar("luis") is None             # ...pero luis puede seguir
+        lim.registrar_gasto(1.5)
+        assert "límite de uso" in lim.revisar("luis")  # y el tope de gasto bloquea a todos
+        os.environ["ASISTENTE_LIMITE_USUARIO_DIA"] = "0"
+        os.environ["ASISTENTE_TOPE_DIARIO_USD"] = "0"
+        assert Limites().revisar("ana") is None        # 0 = sin tope
+    finally:
+        del os.environ["ASISTENTE_LIMITE_USUARIO_DIA"], os.environ["ASISTENTE_TOPE_DIARIO_USD"]
+
+
+def test_router_bloquea_al_pasar_el_limite_y_no_truena_si_el_modelo_falla():
+    from asistente_core import router as modulo_router
+    original, lim_original = llm.responder, modulo_router.limites
+    try:
+        def falla(*a, **k):
+            raise RuntimeError("sin saldo")
+        llm.responder = falla
+        modulo_router.limites = Limites()
+        app = FastAPI()
+        app.include_router(crear_router(_toolkit(nombre_app="App")))
+        c = TestClient(app)
+        r = c.post("/asistente/chat", json={"mensaje": "hola"})
+        assert r.status_code == 200 and "No pude consultar" in r.json()["reply"]
+        assert "sin saldo" not in r.text               # el detalle técnico no llega al usuario
+        os.environ["ASISTENTE_LIMITE_USUARIO_DIA"] = "1"
+        modulo_router.limites = Limites()
+        c.post("/asistente/chat", json={"mensaje": "uno"})
+        assert "límite" in c.post("/asistente/chat", json={"mensaje": "dos"}).json()["reply"]
+    finally:
+        os.environ.pop("ASISTENTE_LIMITE_USUARIO_DIA", None)
+        llm.responder, modulo_router.limites = original, lim_original
+
+
+def test_el_historial_no_lleva_bloques_de_razonamiento():
+    mensajes = [{"role": "user", "content": "hola"},
+                {"role": "assistant", "content": [{"type": "thinking", "thinking": "", "signature": "x"},
+                                                  {"type": "text", "text": "hola"}]}]
+    limpio = anthropic_provider._sin_pensamiento(mensajes)
+    assert [b["type"] for b in limpio[1]["content"]] == ["text"] and limpio[0] == mensajes[0]
+
+
+def test_redactor_con_claude_usa_su_variable_y_reporta_el_costo():
+    from types import SimpleNamespace
+    llamadas = []
+
+    class _Mensajes:
+        def create(self, **kw):
+            llamadas.append(kw)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="Texto de Claude.")],
+                                   usage=SimpleNamespace(input_tokens=1000, output_tokens=2000))
+
+    anterior = (anthropic_provider._get_client, os.environ.get("ASISTENTE_PROVIDER"),
+                os.environ.get("ASISTENTE_MODEL_REDACTOR"))
+    anthropic_provider._get_client = lambda: SimpleNamespace(messages=_Mensajes())
+    os.environ["ASISTENTE_PROVIDER"] = "anthropic"
+    os.environ["ASISTENTE_MODEL_REDACTOR"] = "claude-sonnet-5-5"
+    try:
+        texto, uso = redactor.redactar_con_uso(_toolkit(contexto_redactor="Contexto."), REPORTE_DE_PRUEBA)
+        assert texto == "Texto de Claude." and llamadas[0]["model"] == "claude-sonnet-5-5"
+        assert llamadas[0]["system"].startswith("Contexto.") and "tools" not in llamadas[0]
+        assert abs(uso["costo_usd"] - 0.022) < 1e-9          # 1000*2/1e6 + 2000*10/1e6
+    finally:
+        anthropic_provider._get_client = anterior[0]
+        for k, v in (("ASISTENTE_PROVIDER", anterior[1]), ("ASISTENTE_MODEL_REDACTOR", anterior[2])):
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
 
 if __name__ == "__main__":

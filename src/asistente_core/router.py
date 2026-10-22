@@ -6,7 +6,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import llm, redactor
+from .config import asistente_activo
 from .informe import construir_reporte_html
+from .limites import limites
 from .toolkit import Toolkit
 
 _JS = Path(__file__).parent / "static" / "asistente.js"
@@ -21,6 +23,20 @@ def _reemplazar_ultima_respuesta(historial, texto):
         historial[-1]["content"] = [{"type": "text", "text": texto}]
     else:
         historial[-1]["content"] = texto
+
+
+def _usuario(request: Request) -> str:
+    """Quién consulta, para el límite diario: dato de la sesión del dashboard o, si no hay, la IP."""
+    claims = getattr(request.state, "user", None)
+    if isinstance(claims, dict):
+        for campo in ("sub", "email", "username", "user", "user_id", "uid"):
+            if claims.get(campo):
+                return str(claims[campo])
+    return request.client.host if request.client else "desconocido"
+
+
+def _respuesta_simple(texto: str, historial: list[dict]) -> dict:
+    return {"reply": texto, "chart_spec": None, "tabla": None, "historial": historial, "tool_trace": []}
 
 
 class ChatRequest(BaseModel):
@@ -42,6 +58,9 @@ def crear_router(
         de datos activo para mostrarlo en el encabezado de los reportes.
     """
     router = APIRouter(prefix="/asistente", tags=["asistente"])
+    if not asistente_activo():
+        print("INFO: asistente apagado (ASISTENTE_ACTIVO no está en 1); no se expone ninguna ruta /asistente.")
+        return router
 
     @router.get("/asistente.js", include_in_schema=False)
     def script():
@@ -53,13 +72,38 @@ def crear_router(
     # en otro hilo y las demás páginas siguen atendiéndose.
     @router.post("/chat")
     def chat(request: Request, payload: ChatRequest):
-        resultado = llm.responder(payload.mensaje, payload.historial, request, toolkit)
+        usuario = _usuario(request)
+        bloqueo = limites.revisar(usuario)
+        if bloqueo:
+            return _respuesta_simple(bloqueo, payload.historial)
+        try:
+            resultado = llm.responder(payload.mensaje, payload.historial, request, toolkit)
+        except Exception as e:   # sin saldo, sin red, llave inválida...: el detalle va al registro, no al usuario
+            print(f"[asistente] ERROR al consultar el modelo: {type(e).__name__}: {e}", flush=True)
+            return _respuesta_simple("No pude consultar al asistente en este momento. Intenta de nuevo en unos minutos.",
+                                     payload.historial)
+        uso = resultado.get("uso")
+        if uso:
+            limites.registrar_gasto(uso.get("costo_usd"))
+            print(f"[asistente] usuario={usuario} modelo={uso['modelo']} llamadas={uso['llamadas']} "
+                  f"tokens_in={uso['tokens_entrada']} tokens_out={uso['tokens_salida']} "
+                  f"costo≈${uso['costo_usd']:.4f} gasto_hoy≈${limites.gasto_hoy:.2f} "
+                  f"herramientas={[t['tool'] for t in resultado.get('tool_trace', [])]}", flush=True)
 
         # Si se usó el reporte extenso, aquí se arma la página completa (una sola
         # vez, no en cada proveedor) con la narrativa del modelo + los datos reales.
         reporte_data = resultado.pop("reporte_data", None)
         if reporte_data and "error" not in reporte_data:
-            texto = redactor.redactar(toolkit, reporte_data)   # None si no hay redactor o si falló
+            texto, uso_redactor = redactor.redactar_con_uso(toolkit, reporte_data)   # None si no hay redactor o falló
+            if uso_redactor:
+                limites.registrar_gasto(uso_redactor["costo_usd"])
+                print(f"[asistente] redactor modelo={uso_redactor['modelo']} tokens_in={uso_redactor['tokens_entrada']} "
+                      f"tokens_out={uso_redactor['tokens_salida']} costo≈${uso_redactor['costo_usd']:.4f} "
+                      f"gasto_hoy≈${limites.gasto_hoy:.2f}", flush=True)
+                if resultado.get("uso"):
+                    resultado["uso"] = {**resultado["uso"], "costo_usd": resultado["uso"]["costo_usd"] + uso_redactor["costo_usd"],
+                                        "tokens_salida": resultado["uso"]["tokens_salida"] + uso_redactor["tokens_salida"],
+                                        "tokens_entrada": resultado["uso"]["tokens_entrada"] + uso_redactor["tokens_entrada"]}
             if texto:
                 resultado["reply"] = texto
                 _reemplazar_ultima_respuesta(resultado.get("historial"), texto)

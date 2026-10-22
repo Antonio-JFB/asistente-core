@@ -192,8 +192,14 @@ app.include_router(asistente_router)
 En la plantilla base (el HTML común a todas las páginas), una línea:
 
 ```html
-<script src="/asistente/asistente.js"></script>
+{% if asistente_activo %}<script src="/asistente/asistente.js"></script>{% endif %}
 ```
+
+`asistente_activo` es el **interruptor**: el asistente viene **apagado** y solo se enciende con
+`ASISTENTE_ACTIVO=1` (ver Paso 6). Para que la plantilla lo conozca, agrégalo al contexto de las
+plantillas (en el dashboard de adeudos se hace en `_ctx_dataset` de `main.py`, con
+`from asistente_core import asistente_activo`). Apagado, no se muestra el botón ni se expone
+ninguna ruta `/asistente`: el código puede estar desplegado en producción sin que nadie lo vea.
 
 ### Paso 6 — Configurar el cerebro y levantarlo
 
@@ -207,7 +213,22 @@ $env:ASISTENTE_MODEL_OLLAMA="llama3.2"      # si usas ollama
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Abre `http://localhost:8000`: el botón de chat aparece abajo a la derecha.
+Para encenderlo hay que poner también `$env:ASISTENTE_ACTIVO="1"`. Abre `http://localhost:8000`:
+el botón de chat aparece abajo a la derecha.
+
+Variables de configuración (todas opcionales salvo la llave si usas Claude; en el servidor van en el
+`.env` del dashboard, que `systemd` carga, y **nunca** en git):
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `ASISTENTE_ACTIVO` | Interruptor general | apagado |
+| `ASISTENTE_PROVIDER` | `anthropic` o `ollama` | `anthropic` |
+| `ANTHROPIC_API_KEY` | Llave de Claude (de un *workspace*, ver sección 7.7) | — |
+| `ASISTENTE_MODEL` | Modelo de Claude | `claude-sonnet-5-5` |
+| `ASISTENTE_MODEL_REDACTOR` | Redactor de reportes largos con Claude | vacío = lo escribe el principal |
+| `ASISTENTE_EFFORT` | Esfuerzo de razonamiento (`low`/`medium`/`high`) | `medium` |
+| `ASISTENTE_LIMITE_USUARIO_DIA` | Consultas por persona al día (0 = sin límite) | 50 |
+| `ASISTENTE_TOPE_DIARIO_USD` | Gasto total al día (0 = sin tope) | 5 |
 
 ### Paso 7 — Medirlo (no te lo saltes)
 
@@ -426,6 +447,25 @@ Cosas que hay que saber:
 - **Cuidado al medir:** corran la batería de a una configuración a la vez. Tres
   corridas pesadas seguidas con `gemma3:12b` hicieron que la computadora se
   cayera; el script de pruebas que usamos es reanudable y espera si la GPU pasa de 80 °C.
+
+### 7.7 Usar Claude (API de Anthropic): configuración y costos
+
+1. **La llave debe pertenecer a un *workspace*.** En la consola de Anthropic: Settings, API keys,
+   crear llave y elegir el campo *Workspace*. Una llave sin workspace falla con el error
+   *"not scoped to a workspace"*. Conviene **una llave por dashboard** para ver el gasto de cada uno.
+2. **Pon un tope de gasto mensual en la consola.** Los topes del paquete (`ASISTENTE_TOPE_DIARIO_USD`,
+   `ASISTENTE_LIMITE_USUARIO_DIA`) viven en el proceso y se reinician con el servicio; el de la consola
+   es el de verdad.
+3. **Costo medido** (Sonnet 5.5, dashboard de adeudos): pregunta corta ≈ 1.3 a 1.6 centavos de dólar;
+   reporte largo ≈ 5 centavos (≈ 2 del modelo principal y ≈ 3 del redactor). Cada consulta imprime en el
+   log del servicio una línea `[asistente] ... costo≈$... gasto_hoy≈$...`.
+4. **Resultados de la batería con Claude** (3 corridas por pregunta): las 11 preguntas dieron 3 de 3,
+   incluido el "reporte de la colonia X" que `llama3.2` nunca acertaba (0 de 6).
+5. **Reportes largos: usa el redactor.** El modelo principal escribe ≈ 500 palabras (se piden 700 a 900);
+   con `ASISTENTE_MODEL_REDACTOR=claude-sonnet-5-5` salen ≈ 960 a 980, sin especulación ni cifras
+   inventadas (3 de 3).
+6. Si la API falla (sin saldo, llave inválida, sin red) el usuario ve *"No pude consultar al asistente
+   en este momento"* y el detalle técnico queda solo en el log del servicio.
 
 ---
 
