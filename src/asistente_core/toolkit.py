@@ -61,6 +61,25 @@ def _sin_valor(valor, tipo: str | None) -> bool:
 
 
 @dataclass
+class Atajo:
+    """Una pregunta que se contesta SIN el modelo: el dato sensible se queda en el servidor.
+
+    Si el mensaje coincide con `patron`, se llama a `funcion(request, dato)` y su texto es la respuesta:
+    ni la pregunta ni el resultado se envían a la API del proveedor del modelo. Sirve, por ejemplo, para
+    "dame el adeudo de este RFC", donde el RFC no debe salir del servidor.
+    """
+
+    nombre: str
+    """Nombre legible (sale en el log; el dato capturado NUNCA se escribe en el log)."""
+
+    patron: str
+    """Expresión regular con un grupo llamado `dato` (lo que se le pasa a `funcion`)."""
+
+    funcion: Callable
+    """funcion(request, dato) -> str. Debe regresar el texto final para el usuario."""
+
+
+@dataclass
 class Toolkit:
     schemas: list[dict]
     """Definiciones de herramientas en formato Anthropic: name, description, input_schema."""
@@ -94,6 +113,18 @@ class Toolkit:
     al modelo (la pregunta viaja a la API del proveedor) y se le pide quitar ese dato. Sirve para que
     nadie pegue por costumbre un RFC, una clave catastral o un correo en un chat que solo trabaja con
     cifras agregadas."""
+
+    atajos: list[Atajo] = field(default_factory=list)
+    """Preguntas que se contestan localmente, sin el modelo (ver `Atajo`). Tienen prioridad sobre
+    `patrones_bloqueados` y sobre el modelo."""
+
+    def buscar_atajo(self, mensaje: str):
+        """(atajo, dato) del primer atajo cuyo patrón coincide con el mensaje, o None."""
+        for atajo in self.atajos:
+            m = re.search(atajo.patron, mensaje or "", re.IGNORECASE)
+            if m:
+                return atajo, (m.group("dato") if "dato" in m.re.groupindex else m.group(0))
+        return None
 
     def dato_bloqueado(self, mensaje: str) -> str | None:
         """Nombre del primer patrón que coincide con el mensaje, o None."""

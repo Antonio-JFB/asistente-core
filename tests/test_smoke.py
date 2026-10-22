@@ -407,6 +407,39 @@ def test_un_dato_bloqueado_no_llega_al_modelo():
         llm.responder = original
 
 
+def test_un_atajo_contesta_sin_el_modelo_y_no_deja_el_dato_en_el_log(capsys=None):
+    import contextlib
+    import io as _io
+    from asistente_core import Atajo
+    from asistente_core import router as modulo_router
+    llamadas, recibido = [], []
+    original, lim_original = llm.responder, modulo_router.limites
+    llm.responder = lambda *a, **k: llamadas.append(1) or {"reply": "x", "historial": [], "tool_trace": []}
+    modulo_router.limites = Limites()
+    try:
+        def funcion(request, dato):
+            recibido.append(dato)
+            return f"Resultado local para {dato}."
+        tk = _toolkit(nombre_app="App", atajos=[Atajo("un RFC", r"(?P<dato>[A-Z]{4}\d{6}[A-Z0-9]{3})", funcion)])
+        app = FastAPI()
+        app.include_router(crear_router(tk))
+        c = TestClient(app)
+        salida = _io.StringIO()
+        with contextlib.redirect_stdout(salida):
+            r = c.post("/asistente/chat", json={"mensaje": "dame el adeudo de ABCD800101XYZ por favor", "historial": [{"role": "user", "content": "hola"}]}).json()
+        assert r["reply"] == "Resultado local para ABCD800101XYZ." and recibido == ["ABCD800101XYZ"]
+        assert not llamadas, "el modelo no debe enterarse"
+        assert r["historial"] == [{"role": "user", "content": "hola"}], "el intercambio no se agrega al historial"
+        assert "ABCD800101XYZ" not in salida.getvalue() and "atajo=un RFC" in salida.getvalue(), "el log no lleva el dato"
+        os.environ["ASISTENTE_LIMITE_USUARIO_DIA"] = "1"
+        modulo_router.limites = Limites()
+        c.post("/asistente/chat", json={"mensaje": "ABCD800101XYZ"})
+        assert "límite" in c.post("/asistente/chat", json={"mensaje": "ABCD800101XYZ"}).json()["reply"], "los atajos cuentan para el límite"
+    finally:
+        os.environ.pop("ASISTENTE_LIMITE_USUARIO_DIA", None)
+        llm.responder, modulo_router.limites = original, lim_original
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

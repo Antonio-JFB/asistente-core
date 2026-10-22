@@ -87,6 +87,20 @@ def crear_router(
     # en otro hilo y las demás páginas siguen atendiéndose.
     @router.post("/chat")
     def chat(request: Request, payload: ChatRequest):
+        encontrado = toolkit.buscar_atajo(payload.mensaje)
+        if encontrado:   # se contesta aquí, sin enviar nada al modelo
+            atajo, valor = encontrado
+            usuario = _usuario(request)
+            bloqueo = limites.revisar(usuario)   # cuenta para el límite diario: evita recorrer datos uno por uno
+            if bloqueo:
+                return _respuesta_simple(bloqueo, payload.historial)
+            try:
+                texto = atajo.funcion(request, valor)
+            except Exception as e:
+                print(f"[asistente] ERROR en el atajo '{atajo.nombre}': {type(e).__name__}", flush=True)
+                texto = "No pude consultar ese dato en este momento. Intenta de nuevo en unos minutos."
+            print(f"[asistente] usuario={usuario} atajo={atajo.nombre} (sin modelo)", flush=True)   # nunca el dato
+            return _respuesta_simple(texto, payload.historial)
         dato = toolkit.dato_bloqueado(payload.mensaje)
         if dato:   # antes de gastar una consulta del límite y, sobre todo, antes de enviar nada al modelo
             return _respuesta_simple(
