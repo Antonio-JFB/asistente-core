@@ -108,6 +108,9 @@ class Toolkit:
     """Una o dos frases del dominio para el modelo redactor (ver redactor.py), por ejemplo qué
     miden los scores. Sin esto el redactor describe los datos con vocabulario genérico."""
 
+    saludo: str = ""
+    """Mensaje de bienvenida que el botón de chat muestra al abrirse (no se envía al modelo). Vacío = saludo genérico."""
+
     patrones_bloqueados: dict[str, str] = field(default_factory=dict)
     """nombre legible -> expresión regular. Si la pregunta del usuario coincide con alguna, NO se envía
     al modelo (la pregunta viaja a la API del proveedor) y se le pide quitar ese dato. Sirve para que

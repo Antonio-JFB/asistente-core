@@ -23,9 +23,87 @@
     }
   }
 
+  // El servidor antepone window.ASISTENTE_CONFIG = {saludo: "..."} (ver router.py). Sin él, saludo genérico.
+  const CFG = window.ASISTENTE_CONFIG || {};
+  const SALUDO = CFG.saludo ||
+    "¡Hola! Soy el asistente de datos de este dashboard. Pregúntame por cifras o rankings, o pídeme un reporte completo que puedas descargar en PDF.";
+
   let historial = leerJSON(KEY_HISTORIAL, []);
   let mensajes = leerJSON(KEY_MENSAJES, []);
   let plotlyListo = !!window.Plotly;
+  let esperando = false;
+
+  // Animación de los tres puntitos mientras el asistente prepara la respuesta.
+  function inyectarEstilos() {
+    if (document.getElementById("asistente-estilos")) return;
+    const st = document.createElement("style");
+    st.id = "asistente-estilos";
+    st.textContent =
+      "@keyframes asistente-salto{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-4px);opacity:1}}" +
+      ".asistente-punto{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:#64748b;" +
+      "animation:asistente-salto 1.2s infinite ease-in-out}" +
+      ".asistente-punto:nth-child(2){animation-delay:.15s}.asistente-punto:nth-child(3){animation-delay:.3s}" +
+      "@media (prefers-reduced-motion:reduce){.asistente-punto{animation:none;opacity:.7}}";
+    document.head.appendChild(st);
+  }
+
+  function burbujaAsistente(htmlInterno, id) {
+    const cont = document.getElementById("asistente-msgs");
+    const fila = document.createElement("div");
+    if (id) fila.id = id;
+    fila.style.marginBottom = ".6rem";
+    fila.style.textAlign = "left";
+    const span = document.createElement("span");
+    Object.assign(span.style, {
+      display: "inline-block", padding: ".4rem .7rem", borderRadius: "10px",
+      background: "#e2e8f0", color: "#0f172a", maxWidth: "90%",
+    });
+    span.innerHTML = htmlInterno;
+    fila.appendChild(span);
+    cont.appendChild(fila);
+    cont.scrollTop = cont.scrollHeight;
+    return fila;
+  }
+
+  // Saludo al abrir el chat cuando todavía no hay conversación. No se guarda ni se manda al modelo.
+  function mostrarSaludo() {
+    if (mensajes.length || document.getElementById("asistente-saludo")) return;
+    const fila = burbujaAsistente("", "asistente-saludo");
+    fila.firstChild.textContent = SALUDO;
+  }
+
+  function mostrarEscribiendo() {
+    quitarEscribiendo();
+    const fila = burbujaAsistente(
+      '<span class="asistente-punto"></span><span class="asistente-punto"></span><span class="asistente-punto"></span>',
+      "asistente-escribiendo");
+    fila.firstChild.setAttribute("aria-label", "El asistente está escribiendo");
+    // Los reportes largos tardan hasta un minuto: se avisa para que nadie piense que se trabó.
+    fila._aviso = setTimeout(() => {
+      const nota = document.createElement("div");
+      nota.style.cssText = "font-size:.72rem;color:#64748b;margin-top:.25rem";
+      nota.textContent = "Esto puede tardar un poco si es un reporte...";
+      fila.firstChild.appendChild(nota);
+      document.getElementById("asistente-msgs").scrollTop = 1e9;
+    }, 8000);
+  }
+
+  function quitarEscribiendo() {
+    const fila = document.getElementById("asistente-escribiendo");
+    if (!fila) return;
+    clearTimeout(fila._aviso);
+    fila.remove();
+  }
+
+  function bloquearEntrada(bloquear) {
+    esperando = bloquear;
+    const input = document.getElementById("asistente-input");
+    const enviarBtn = document.querySelector("#asistente-form button[type=submit]");
+    input.disabled = bloquear;
+    enviarBtn.disabled = bloquear;
+    enviarBtn.style.opacity = bloquear ? ".5" : "1";
+    if (!bloquear) input.focus();
+  }
 
   function guardar() {
     try {
@@ -82,11 +160,19 @@
     document.body.appendChild(panel);
 
     btn.onclick = () => {
-      panel.style.display = panel.style.display === "none" ? "flex" : "none";
+      const abrir = panel.style.display === "none";
+      panel.style.display = abrir ? "flex" : "none";
+      if (abrir) {
+        mostrarSaludo();
+        const input = document.getElementById("asistente-input");
+        if (!input.disabled) input.focus();
+      }
     };
 
     document.getElementById("asistente-form").addEventListener("submit", enviar);
     document.getElementById("asistente-limpiar").addEventListener("click", vaciar);
+    document.getElementById("asistente-msgs").setAttribute("aria-live", "polite");
+    inyectarEstilos();
 
     // Restaura la conversación de páginas anteriores, si había una.
     mensajes.forEach((m) => pintarMensaje(m.rol, m.texto, m.chartSpec, m.tabla, m.reporteHtml));
@@ -97,15 +183,20 @@
     mensajes = [];
     guardar();
     document.getElementById("asistente-msgs").innerHTML = "";
+    if (esperando) mostrarEscribiendo();   // la respuesta que viene en camino se pintará después
+    else mostrarSaludo();
   }
 
   async function enviar(e) {
     e.preventDefault();
+    if (esperando) return;
     const input = document.getElementById("asistente-input");
     const texto = input.value.trim();
     if (!texto) return;
     input.value = "";
     agregarMensaje("user", texto);
+    bloquearEntrada(true);
+    mostrarEscribiendo();
 
     try {
       const resp = await fetch("/asistente/chat", {
@@ -116,9 +207,13 @@
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const data = await resp.json();
       historial = data.historial || historial;
+      quitarEscribiendo();
       agregarMensaje("assistant", data.reply || "(sin respuesta)", data.chart_spec, data.tabla, data.reporte_html);
     } catch (err) {
+      quitarEscribiendo();
       agregarMensaje("assistant", "Ocurrió un error al consultar el asistente.");
+    } finally {
+      bloquearEntrada(false);
     }
   }
 

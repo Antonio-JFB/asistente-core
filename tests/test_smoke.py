@@ -440,6 +440,16 @@ def test_un_atajo_contesta_sin_el_modelo_y_no_deja_el_dato_en_el_log(capsys=None
         llm.responder, modulo_router.limites = original, lim_original
 
 
+def test_el_script_lleva_el_saludo_del_dashboard():
+    app = FastAPI()
+    app.include_router(crear_router(_toolkit(nombre_app="App", saludo='¡Hola! Soy el asistente de "Demo".')))
+    r = TestClient(app).get("/asistente/asistente.js")
+    assert r.status_code == 200 and r.text.startswith("window.ASISTENTE_CONFIG = ")
+    assert '"saludo": "¡Hola! Soy el asistente de \\"Demo\\"."' in r.text, "el saludo debe ir escapado como JSON"
+    assert "asistente-escribiendo" in r.text and "mostrarSaludo" in r.text, "el script trae el saludo y los puntitos"
+    assert "no-cache" in r.headers["cache-control"]
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

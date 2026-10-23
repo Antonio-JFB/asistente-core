@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 from typing import Callable
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from . import llm, redactor
@@ -79,7 +80,10 @@ def crear_router(
 
     @router.get("/asistente.js", include_in_schema=False)
     def script():
-        return FileResponse(_JS, media_type="application/javascript")
+        # La configuración del dashboard (saludo) se antepone al script, sin una petición extra.
+        config = "window.ASISTENTE_CONFIG = " + json.dumps({"saludo": toolkit.saludo}, ensure_ascii=False) + ";\n"
+        return Response(config + _JS.read_text(encoding="utf-8"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
     # `def` y no `async def` a propósito: la llamada al modelo es bloqueante (de
     # segundos a minutos con un modelo local). En una función async congelaría
