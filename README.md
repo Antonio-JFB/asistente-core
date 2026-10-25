@@ -243,6 +243,30 @@ correctas se calculan de tus datos reales:
 
 Repítelo **cada vez** que cambies el prompt, las herramientas o el modelo.
 
+### Variante para dashboards en Django
+
+El motor es el mismo; solo cambia cómo se conecta. En vez de `crear_router` (FastAPI), en el `urls.py` del proyecto:
+
+```python
+from asistente_core import Toolkit
+from asistente_core.django_vistas import urlpatterns_asistente
+
+urlpatterns += urlpatterns_asistente(toolkit, etiqueta_dataset=lambda request: "Mi dashboard")
+```
+
+- El `toolkit` se arma igual que en FastAPI (herramientas, contexto, saludo, atajos). Las herramientas reciben el
+  `HttpRequest` de Django como primer argumento.
+- Con `ASISTENTE_ACTIVO` apagado la lista queda vacía: no hay rutas. La plantilla base carga el botón solo si está
+  encendido (`<script src="/asistente/asistente.js"></script>`).
+- **CSRF:** el chat usa la protección normal de Django. El script del botón deja la cookie `csrftoken` y manda el
+  token en la cabecera `X-CSRFToken`; no hace falta `csrf_exempt`.
+- **Sesión:** sin usuario autenticado responde 401 en JSON. Por defecto "autenticado" es `request.user.is_authenticated`;
+  si el dashboard usa otro login (por ejemplo una cookie JWT compartida) se pasa `autenticado=funcion(request)`.
+- **gunicorn:** una llamada al modelo tarda hasta ~1 minuto con un reporte largo, y gunicorn mata el proceso a los
+  30 s por defecto. Hay que subir el tiempo y usar hilos: `--timeout 180 --threads 4` (y, en nginx,
+  `proxy_read_timeout 180s`). Con varios procesos cada uno lleva su propia cuenta de los topes diarios.
+- Pruebas del adaptador: `python tests/test_django.py` (necesita Django; si no está, se omiten).
+
 ### Probar el paquete por separado
 
 Estas pruebas no necesitan ningún modelo ni conexión:

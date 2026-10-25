@@ -108,6 +108,10 @@ class Toolkit:
     """Una o dos frases del dominio para el modelo redactor (ver redactor.py), por ejemplo qué
     miden los scores. Sin esto el redactor describe los datos con vocabulario genérico."""
 
+    usuario_de: Callable | None = None
+    """Opcional: funcion(request) -> str con el nombre de quien consulta (para el límite diario). Sin ella se
+    reconoce solo `request.state.user`, `request.user` de Django o la sesión; ver `chat.usuario_de`."""
+
     saludo: str = ""
     """Mensaje de bienvenida que el botón de chat muestra al abrirse (no se envía al modelo). Vacío = saludo genérico."""
 

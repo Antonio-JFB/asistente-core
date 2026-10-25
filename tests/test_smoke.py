@@ -321,7 +321,7 @@ def test_limite_diario_por_usuario_y_tope_de_gasto():
 
 
 def test_router_bloquea_al_pasar_el_limite_y_no_truena_si_el_modelo_falla():
-    from asistente_core import router as modulo_router
+    from asistente_core import chat as modulo_router
     original, lim_original = llm.responder, modulo_router.limites
     try:
         def falla(*a, **k):
@@ -411,7 +411,7 @@ def test_un_atajo_contesta_sin_el_modelo_y_no_deja_el_dato_en_el_log(capsys=None
     import contextlib
     import io as _io
     from asistente_core import Atajo
-    from asistente_core import router as modulo_router
+    from asistente_core import chat as modulo_router
     llamadas, recibido = [], []
     original, lim_original = llm.responder, modulo_router.limites
     llm.responder = lambda *a, **k: llamadas.append(1) or {"reply": "x", "historial": [], "tool_trace": []}

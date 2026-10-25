@@ -187,6 +187,14 @@
     else mostrarSaludo();
   }
 
+  // Django exige el token CSRF en las peticiones POST: se lee de la cookie `csrftoken` si existe (FastAPI no la usa).
+  function cabeceras() {
+    const h = { "Content-Type": "application/json" };
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    if (m) h["X-CSRFToken"] = decodeURIComponent(m[1]);
+    return h;
+  }
+
   async function enviar(e) {
     e.preventDefault();
     if (esperando) return;
@@ -201,7 +209,8 @@
     try {
       const resp = await fetch("/asistente/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: cabeceras(),
+        credentials: "same-origin",
         body: JSON.stringify({ mensaje: texto, historial }),
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
