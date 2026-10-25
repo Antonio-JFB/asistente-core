@@ -25,6 +25,13 @@
 
   // El servidor antepone window.ASISTENTE_CONFIG = {saludo: "..."} (ver router.py). Sin él, saludo genérico.
   const CFG = window.ASISTENTE_CONFIG || {};
+
+  // Íconos en línea (SVG): así el botón se ve igual aunque el dashboard no cargue Bootstrap Icons.
+  const svg = (d) => '<svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" ' +
+    'style="vertical-align:-.2em" aria-hidden="true"><path d="' + d + '"/></svg>';
+  const ICONO_CHAT = svg("M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z");
+  const ICONO_BORRAR = svg("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
+  const ICONO_ENVIAR = svg("M2.01 21L23 12 2.01 3 2 10l15 2-15 2z");
   const SALUDO = CFG.saludo ||
     "¡Hola! Soy el asistente de datos de este dashboard. Pregúntame por cifras o rankings, o pídeme un reporte completo que puedas descargar en PDF.";
 
@@ -127,7 +134,7 @@
     const btn = document.createElement("button");
     btn.id = "asistente-btn";
     btn.title = "Asistente de datos";
-    btn.innerHTML = '<i class="bi bi-chat-dots-fill"></i>';
+    btn.innerHTML = ICONO_CHAT;
     Object.assign(btn.style, {
       position: "fixed", bottom: "20px", right: "20px", zIndex: 1050,
       width: "52px", height: "52px", borderRadius: "50%", border: "0",
@@ -147,13 +154,13 @@
       '<div style="background:#0f172a;color:#fff;padding:.6rem .9rem;font-weight:600;font-size:.9rem;display:flex;justify-content:space-between;align-items:center">' +
       '  <span>Asistente de datos</span>' +
       '  <button id="asistente-limpiar" title="Vaciar conversación" ' +
-      '    style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:.8rem"><i class="bi bi-trash"></i></button>' +
+      '    style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:.8rem">' + ICONO_BORRAR + '</button>' +
       "</div>" +
       '<div id="asistente-msgs" style="flex:1;overflow-y:auto;padding:.6rem;font-size:.85rem;background:#f8fafc"></div>' +
       '<form id="asistente-form" style="display:flex;border-top:1px solid #e2e8f0">' +
       '  <input id="asistente-input" placeholder="Pregunta algo..." autocomplete="off" ' +
       '    style="flex:1;border:0;padding:.6rem;font-size:.85rem;outline:none">' +
-      '  <button type="submit" style="border:0;background:#0d6efd;color:#fff;padding:0 .9rem"><i class="bi bi-send-fill"></i></button>' +
+      '  <button type="submit" style="border:0;background:#0d6efd;color:#fff;padding:0 .9rem">' + ICONO_ENVIAR + '</button>' +
       "</form>";
 
     document.body.appendChild(btn);
