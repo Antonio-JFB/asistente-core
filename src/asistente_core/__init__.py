@@ -4,7 +4,7 @@ from .prompts import construir_instrucciones_reporte, construir_system_prompt
 
 from .toolkit import Atajo, Toolkit
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 def crear_router(*args, **kwargs):

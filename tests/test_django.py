@@ -20,7 +20,8 @@ except ImportError:
 settings.configure(
     DEBUG=False, SECRET_KEY="prueba", ALLOWED_HOSTS=["testserver"], ROOT_URLCONF=__name__,
     INSTALLED_APPS=["django.contrib.contenttypes", "django.contrib.auth", "django.contrib.sessions"],
-    MIDDLEWARE=["django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.csrf.CsrfViewMiddleware"],
+    # Sin CsrfViewMiddleware a propósito: hay proyectos (predial_dashboard) que no lo traen y el chat debe exigir el token igual.
+    MIDDLEWARE=["django.contrib.sessions.middleware.SessionMiddleware"],
     SESSION_ENGINE="django.contrib.sessions.backends.signed_cookies",
 )
 django.setup()
@@ -112,6 +113,7 @@ def test_vista_directa_con_usuario_autenticado_por_defecto():
     chat, _ = crear_vistas(TK)
     pedido = RequestFactory().post("/asistente/chat", data=json.dumps({"mensaje": "hola"}), content_type="application/json")
     pedido.user = SimpleNamespace(is_authenticated=False)
+    pedido._dont_enforce_csrf_checks = True   # aquí se prueba solo la sesión; el CSRF ya se prueba arriba
     assert chat(pedido).status_code == 401, "por defecto exige request.user.is_authenticated"
 
 

@@ -10,8 +10,8 @@ Con ASISTENTE_ACTIVO apagado la lista queda vacía: no hay rutas ni botón. Las 
 POST /asistente/chat y GET /asistente/asistente.js (el botón, que sirve el propio paquete).
 
 Seguridad:
-  * El chat usa la protección CSRF normal de Django: el botón manda el token en la cabecera X-CSRFToken
-    (la vista del script lo deja en una cookie con ensure_csrf_cookie).
+  * El chat exige el token CSRF de Django aunque el proyecto no tenga CsrfViewMiddleware: el botón lo manda en la
+    cabecera X-CSRFToken (la vista del script deja la cookie con ensure_csrf_cookie).
   * Sin sesión válida responde 401 en JSON (no redirige al login: un fetch no podría leer esa página).
     Por defecto "con sesión" es `request.user.is_authenticated`; un dashboard con otro login (por ejemplo una
     cookie JWT compartida) da su propia función en `autenticado`.
@@ -25,7 +25,7 @@ from typing import Callable
 
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.urls import path
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 
 from .chat import procesar_chat, script_con_config
 from .config import asistente_activo
@@ -44,6 +44,7 @@ def crear_vistas(
     """(vista_chat, vista_script) para un dashboard."""
     esta_autenticado = autenticado or _autenticado_por_defecto
 
+    @csrf_protect   # se aplica aunque el proyecto no tenga CsrfViewMiddleware (algunos no lo traen)
     def chat(request):
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
