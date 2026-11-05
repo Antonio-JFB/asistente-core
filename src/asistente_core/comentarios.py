@@ -20,6 +20,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -33,6 +34,15 @@ CATEGORIAS = {
     "otro": "Otro comentario",
 }
 CAMPOS = ["fecha", "usuario", "dashboard", "categoria", "comentario"]
+
+# Datos que un comentario nunca debe llevar, aunque el dashboard no tenga filtro en su chat (Churn, A2, Descuentos HMO).
+# Se suman a los `patrones_bloqueados` y a los RFC de los `atajos` de cada dashboard.
+PATRONES_COMENTARIO = {
+    "un RFC": r"(?<![A-Z0-9])[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}(?![A-Z0-9])",
+    "una CURP": r"(?<![A-Z0-9])[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d(?![A-Z0-9])",
+    "un correo electrónico": r"[\w.+-]+@[\w-]+\.[\w.-]+",
+    "un número de teléfono": r"(?<!\d)\d{10}(?!\d)",
+}
 
 
 def archivo_de_comentarios() -> Path:
@@ -84,6 +94,8 @@ def procesar_comentario(toolkit: Toolkit, categoria: str, texto: str, usuario: s
     if not dato:
         atajo = toolkit.buscar_atajo(texto)
         dato = atajo[0].nombre if atajo else None
+    if not dato:
+        dato = next((n for n, p in PATRONES_COMENTARIO.items() if re.search(p, texto, re.IGNORECASE)), None)
     if dato:
         return 422, {"ok": False, "detail": f"Tu comentario incluye {dato}. Por privacidad no se guarda: quítalo y vuelve a enviarlo."}
 

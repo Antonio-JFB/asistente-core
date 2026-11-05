@@ -516,6 +516,21 @@ def test_un_comentario_con_datos_personales_se_rechaza_y_no_se_guarda():
             os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
 
 
+def test_un_dashboard_sin_filtro_igual_rechaza_datos_personales_en_los_comentarios():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, ruta = _app_comentarios(tmp)   # sin patrones_bloqueados ni atajos, como Churn, A2 y Descuentos HMO
+            for texto, dato in [("el RFC mhe570101fi1 salio mal", "un RFC"), ("CURP ABCD800101HSRRRR09", "una CURP"),
+                                ("escribanme a juan@correo.com", "un correo electrónico"), ("llamen al 6621234567", "un número de teléfono")]:
+                r = c.post("/asistente/comentarios", json={"texto": texto})
+                assert r.status_code == 422 and dato in r.json()["detail"], (texto, r.text)
+            assert c.post("/asistente/comentarios", json={"texto": "En 2025 hubo 1250 cuentas y 33 colonias."}).status_code == 200
+            assert len(ruta.read_text(encoding="utf-8").splitlines()) == 1, "solo se guardó el comentario sin datos personales"
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
 def test_limite_de_comentarios_por_persona_al_dia():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:

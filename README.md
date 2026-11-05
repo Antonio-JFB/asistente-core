@@ -290,7 +290,8 @@ caracteres. No hay que programar nada en el dashboard: aparece solo al actualiza
   `asistente_comentarios.jsonl` en la carpeta donde corre el dashboard). Ponlo **fuera del repositorio** (en el servidor,
   junto al archivo de variables) y con permisos restringidos; el paquete lo crea con permisos 600.
 * **Privacidad:** el comentario pasa por el mismo filtro de datos protegidos que el chat (`patrones_bloqueados` y los
-  RFC de los `atajos`). Si trae uno, se rechaza y no se guarda.
+  RFC de los `atajos`) y, además, por un filtro propio que siempre aplica (RFC, CURP, correo y teléfono), aunque el
+  dashboard no tenga filtro en su chat. Si trae uno, se rechaza y no se guarda.
 * **Límite:** `ASISTENTE_LIMITE_COMENTARIOS_DIA` comentarios por persona por día (default 10; 0 = sin límite).
 * **Ruta:** `POST /asistente/comentarios` (FastAPI y Django; en Django exige sesión y token CSRF, igual que el chat).
 * **Leerlos en Excel:**
