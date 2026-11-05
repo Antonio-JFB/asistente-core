@@ -450,6 +450,122 @@ def test_el_script_lleva_el_saludo_del_dashboard():
     assert "no-cache" in r.headers["cache-control"]
 
 
+def _app_comentarios(tmp, **kw):
+    """App de prueba con el archivo de comentarios en una carpeta temporal. Regresa (cliente, ruta del archivo)."""
+    import pathlib
+    from asistente_core import comentarios
+    ruta = pathlib.Path(tmp) / "comentarios.jsonl"
+    os.environ["ASISTENTE_COMENTARIOS_ARCHIVO"] = str(ruta)
+    comentarios.contador = comentarios._Contador()
+    app = FastAPI()
+    app.include_router(crear_router(_toolkit(nombre_app="App", **kw)))
+    return TestClient(app), ruta
+
+
+def test_un_comentario_se_guarda_sin_preguntas_ni_respuestas_y_sin_texto_en_el_log():
+    import contextlib
+    import io as _io
+    import json as _json
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, ruta = _app_comentarios(tmp)
+            salida = _io.StringIO()
+            with contextlib.redirect_stdout(salida):
+                r = c.post("/asistente/comentarios", json={"categoria": "sugerencia", "texto": "  Sería bueno poder filtrar por año.  "})
+            assert r.status_code == 200 and r.json() == {"ok": True}
+            filas = [_json.loads(x) for x in ruta.read_text(encoding="utf-8").splitlines()]
+            assert len(filas) == 1 and filas[0]["comentario"] == "Sería bueno poder filtrar por año."
+            assert filas[0]["categoria"] == "sugerencia" and filas[0]["dashboard"] == "App" and filas[0]["usuario"] and filas[0]["fecha"]
+            assert set(filas[0]) == {"fecha", "usuario", "dashboard", "categoria", "comentario"}, "solo lo que la persona escribió"
+            assert "filtrar" not in salida.getvalue() and "comentario guardado" in salida.getvalue(), "el log no lleva el texto"
+            # una categoría desconocida se guarda como "otro"
+            c.post("/asistente/comentarios", json={"categoria": "<script>", "texto": "hola"})
+            assert _json.loads(ruta.read_text(encoding="utf-8").splitlines()[1])["categoria"] == "otro"
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_un_comentario_vacio_o_muy_largo_no_se_guarda():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, ruta = _app_comentarios(tmp)
+            assert c.post("/asistente/comentarios", json={"texto": "   "}).status_code == 400
+            r = c.post("/asistente/comentarios", json={"texto": "x" * 1001})
+            assert r.status_code == 400 and "1000" in r.json()["detail"]
+            assert c.post("/asistente/comentarios", json={"texto": "x" * 5001}).status_code == 422, "FastAPI corta lo absurdo"
+            assert not ruta.exists()
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_un_comentario_con_datos_personales_se_rechaza_y_no_se_guarda():
+    import tempfile
+    from asistente_core import Atajo
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, ruta = _app_comentarios(tmp, patrones_bloqueados={"un correo electrónico": r"[\w.+-]+@[\w-]+\.[\w.-]+"},
+                                       atajos=[Atajo("un RFC", r"(?P<dato>[A-Z]{4}\d{6}[A-Z0-9]{3})", lambda r, d: "x")])
+            r = c.post("/asistente/comentarios", json={"texto": "escríbanme a juan@correo.com"})
+            assert r.status_code == 422 and "un correo electrónico" in r.json()["detail"]
+            r = c.post("/asistente/comentarios", json={"texto": "el RFC ABCD800101XYZ salió mal"})
+            assert r.status_code == 422 and "un RFC" in r.json()["detail"], "los RFC de los atajos también se rechazan"
+            assert not ruta.exists(), "nada de eso se guarda"
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_limite_de_comentarios_por_persona_al_dia():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            os.environ["ASISTENTE_LIMITE_COMENTARIOS_DIA"] = "2"
+            c, ruta = _app_comentarios(tmp)
+            assert [c.post("/asistente/comentarios", json={"texto": f"c{i}"}).status_code for i in range(3)] == [200, 200, 429]
+            assert len(ruta.read_text(encoding="utf-8").splitlines()) == 2
+        finally:
+            os.environ.pop("ASISTENTE_LIMITE_COMENTARIOS_DIA", None)
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_si_no_se_puede_escribir_el_archivo_responde_error_sin_truenar():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, _ = _app_comentarios(tmp)
+            os.environ["ASISTENTE_COMENTARIOS_ARCHIVO"] = tmp   # una carpeta, no un archivo: abrirla falla
+            r = c.post("/asistente/comentarios", json={"texto": "hola"})
+            assert r.status_code == 500 and "No pude guardar" in r.json()["detail"]
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_exportar_comentarios_a_csv_para_excel():
+    import tempfile
+    from asistente_core import comentarios
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            c, ruta = _app_comentarios(tmp)
+            c.post("/asistente/comentarios", json={"categoria": "error", "texto": "Una cifra no coincide, con \"comillas\" y coma."})
+            with ruta.open("a", encoding="utf-8") as f:
+                f.write("línea dañada\n")
+            salida = ruta.with_suffix(".csv")
+            assert comentarios.exportar_csv(ruta, salida) == 1, "una línea dañada no impide exportar las demás"
+            texto = salida.read_text(encoding="utf-8-sig")
+            assert texto.splitlines()[0] == "fecha,usuario,dashboard,categoria,comentario" and "comillas" in texto
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
+
+
+def test_el_script_trae_el_formulario_de_comentarios():
+    app = FastAPI()
+    app.include_router(crear_router(_toolkit(nombre_app="App")))
+    js = TestClient(app).get("/asistente/asistente.js").text
+    assert "/asistente/comentarios" in js and "asistente-comentar" in js and "No escribas nombres, RFC" in js
+    assert "pulgar" not in js.lower(), "solo comentarios: sin pulgares"
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

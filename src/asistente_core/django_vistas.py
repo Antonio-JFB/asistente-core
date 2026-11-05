@@ -7,7 +7,7 @@ Uso, en el `urls.py` del proyecto:
     urlpatterns += urlpatterns_asistente(toolkit, etiqueta_dataset=lambda request: "Mi dashboard")
 
 Con ASISTENTE_ACTIVO apagado la lista queda vacía: no hay rutas ni botón. Las dos rutas son
-POST /asistente/chat y GET /asistente/asistente.js (el botón, que sirve el propio paquete).
+POST /asistente/chat, POST /asistente/comentarios y GET /asistente/asistente.js (el botón, que sirve el propio paquete).
 
 Seguridad:
   * El chat exige el token CSRF de Django aunque el proyecto no tenga CsrfViewMiddleware: el botón lo manda en la
@@ -27,7 +27,8 @@ from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 
-from .chat import procesar_chat, script_con_config
+from .chat import procesar_chat, script_con_config, usuario_de
+from .comentarios import procesar_comentario
 from .config import asistente_activo
 from .toolkit import Toolkit
 
@@ -41,7 +42,7 @@ def crear_vistas(
     etiqueta_dataset: Callable[[object], str] | None = None,
     autenticado: Callable[[object], bool] | None = None,
 ):
-    """(vista_chat, vista_script) para un dashboard."""
+    """(vista_chat, vista_script, vista_comentarios) para un dashboard."""
     esta_autenticado = autenticado or _autenticado_por_defecto
 
     @csrf_protect   # se aplica aunque el proyecto no tenga CsrfViewMiddleware (algunos no lo traen)
@@ -61,13 +62,30 @@ def crear_vistas(
         resultado = procesar_chat(toolkit, mensaje, historial, request, etiqueta_dataset)
         return JsonResponse(resultado, json_dumps_params={"ensure_ascii": False})
 
+    @csrf_protect
+    def comentarios(request):
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        if not esta_autenticado(request):
+            return JsonResponse({"detail": "No autenticado"}, status=401)
+        try:
+            cuerpo = json.loads(request.body or b"{}")
+            categoria, texto = str(cuerpo.get("categoria", "otro")), str(cuerpo.get("texto", ""))
+            if len(texto) > 5000:
+                raise ValueError("texto demasiado largo")
+        except (ValueError, AttributeError):
+            return JsonResponse({"detail": "Petición inválida"}, status=400)
+        quien = toolkit.usuario_de or usuario_de
+        codigo, resultado = procesar_comentario(toolkit, categoria, texto, quien(request))
+        return JsonResponse(resultado, status=codigo, json_dumps_params={"ensure_ascii": False})
+
     @ensure_csrf_cookie
     def script(request):
         respuesta = HttpResponse(script_con_config(toolkit), content_type="application/javascript")
         respuesta["Cache-Control"] = "no-cache"
         return respuesta
 
-    return chat, script
+    return chat, script, comentarios
 
 
 def urlpatterns_asistente(
@@ -79,8 +97,9 @@ def urlpatterns_asistente(
     if not asistente_activo():
         print("INFO: asistente apagado (ASISTENTE_ACTIVO no está en 1); no se expone ninguna ruta /asistente.")
         return []
-    chat, script = crear_vistas(toolkit, etiqueta_dataset, autenticado)
+    chat, script, comentarios = crear_vistas(toolkit, etiqueta_dataset, autenticado)
     return [
         path("asistente/chat", chat, name="asistente_chat"),
+        path("asistente/comentarios", comentarios, name="asistente_comentarios"),
         path("asistente/asistente.js", script, name="asistente_js"),
     ]

@@ -278,6 +278,32 @@ cd "C:\Trabajo argenrum\q2.1_2026_adeudos"
 
 Debe terminar con `Todo bien.`
 
+### Comentarios de los usuarios (desde v0.5.0)
+
+El chat trae un botón de **comentarios** (el icono de globo en el encabezado, junto al bote de basura). Abre un
+formulario con un tipo de comentario (respuesta incorrecta, sugerencia, otro) y un cuadro de texto de hasta 1,000
+caracteres. No hay que programar nada en el dashboard: aparece solo al actualizar el paquete.
+
+* **Qué se guarda:** fecha, usuario, dashboard, tipo y el texto que la persona escribió. **No** se guardan sus preguntas
+  ni las respuestas del chat, y el registro del servidor tampoco lleva el texto del comentario.
+* **Dónde:** una línea JSON por comentario en el archivo `ASISTENTE_COMENTARIOS_ARCHIVO` (por defecto
+  `asistente_comentarios.jsonl` en la carpeta donde corre el dashboard). Ponlo **fuera del repositorio** (en el servidor,
+  junto al archivo de variables) y con permisos restringidos; el paquete lo crea con permisos 600.
+* **Privacidad:** el comentario pasa por el mismo filtro de datos protegidos que el chat (`patrones_bloqueados` y los
+  RFC de los `atajos`). Si trae uno, se rechaza y no se guarda.
+* **Límite:** `ASISTENTE_LIMITE_COMENTARIOS_DIA` comentarios por persona por día (default 10; 0 = sin límite).
+* **Ruta:** `POST /asistente/comentarios` (FastAPI y Django; en Django exige sesión y token CSRF, igual que el chat).
+* **Leerlos en Excel:**
+
+```bash
+python -m asistente_core.comentarios exportar asistente_comentarios.jsonl comentarios.csv
+```
+
+  El CSV lleva BOM para que Excel respete los acentos. Una línea dañada del archivo no impide exportar las demás.
+
+> Cambio de la v0.5.0 para quien use `crear_vistas` directamente: ahora regresa tres vistas
+> `(chat, script, comentarios)` en lugar de dos. `urlpatterns_asistente` no cambia.
+
 ---
 
 ## 5. Cómo actualizar el paquete

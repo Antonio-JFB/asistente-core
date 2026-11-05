@@ -32,6 +32,10 @@
   const ICONO_CHAT = svg("M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z");
   const ICONO_BORRAR = svg("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
   const ICONO_ENVIAR = svg("M2.01 21L23 12 2.01 3 2 10l15 2-15 2z");
+  const ICONO_COMENTARIO = svg("M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z");
+  // Formulario de comentarios: solo se manda lo que la persona escribe aquí, nunca sus preguntas ni las respuestas del chat.
+  const CATEGORIAS_COMENTARIO = [["error", "Una respuesta fue incorrecta"], ["sugerencia", "Sugerencia o idea"], ["otro", "Otro comentario"]];
+  const MAX_COMENTARIO = 1000;
   const SALUDO = CFG.saludo ||
     "¡Hola! Soy el asistente de datos de este dashboard. Pregúntame por cifras o rankings, o pídeme un reporte completo que puedas descargar en PDF.";
 
@@ -153,8 +157,12 @@
     panel.innerHTML =
       '<div style="background:#0f172a;color:#fff;padding:.6rem .9rem;font-weight:600;font-size:.9rem;display:flex;justify-content:space-between;align-items:center">' +
       '  <span>Asistente de datos</span>' +
-      '  <button id="asistente-limpiar" title="Vaciar conversación" ' +
-      '    style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:.8rem">' + ICONO_BORRAR + '</button>' +
+      '  <span>' +
+      '    <button id="asistente-comentar" title="Enviar comentarios" aria-label="Enviar comentarios" ' +
+      '      style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:.8rem">' + ICONO_COMENTARIO + '</button>' +
+      '    <button id="asistente-limpiar" title="Vaciar conversación" aria-label="Vaciar conversación" ' +
+      '      style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:.8rem">' + ICONO_BORRAR + '</button>' +
+      '  </span>' +
       "</div>" +
       '<div id="asistente-msgs" style="flex:1;overflow-y:auto;padding:.6rem;font-size:.85rem;background:#f8fafc"></div>' +
       '<form id="asistente-form" style="display:flex;border-top:1px solid #e2e8f0">' +
@@ -176,13 +184,98 @@
       }
     };
 
+    crearFormularioComentarios(panel);
     document.getElementById("asistente-form").addEventListener("submit", enviar);
     document.getElementById("asistente-limpiar").addEventListener("click", vaciar);
+    document.getElementById("asistente-comentar").addEventListener("click", abrirComentarios);
     document.getElementById("asistente-msgs").setAttribute("aria-live", "polite");
     inyectarEstilos();
 
     // Restaura la conversación de páginas anteriores, si había una.
     mensajes.forEach((m) => pintarMensaje(m.rol, m.texto, m.chartSpec, m.tabla, m.reporteHtml));
+  }
+
+  // ---- Comentarios -------------------------------------------------------------------------------------------
+  function crearFormularioComentarios(panel) {
+    const f = document.createElement("div");
+    f.id = "asistente-comentarios";
+    f.style.cssText = "position:absolute;top:0;left:0;right:0;bottom:0;background:#fff;display:none;flex-direction:column;" +
+      "padding:.9rem;gap:.55rem;font-size:.85rem;z-index:2;overflow-y:auto";
+    f.innerHTML =
+      '<div style="font-weight:600;font-size:.95rem;color:#0f172a">Enviar comentarios</div>' +
+      '<div style="color:#475569;font-size:.78rem;line-height:1.35">Cuéntanos qué podemos mejorar del asistente. ' +
+      "Solo se envía lo que escribas aquí, no tus preguntas ni las respuestas del chat. " +
+      "<strong>No escribas nombres, RFC ni datos de contribuyentes.</strong></div>" +
+      '<label for="asistente-com-categoria" style="font-size:.78rem;color:#334155;margin:0">Tipo de comentario</label>' +
+      '<select id="asistente-com-categoria" style="padding:.4rem;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem">' +
+      CATEGORIAS_COMENTARIO.map((c) => '<option value="' + c[0] + '">' + c[1] + "</option>").join("") + "</select>" +
+      '<label for="asistente-com-texto" style="font-size:.78rem;color:#334155;margin:0">Tu comentario</label>' +
+      '<textarea id="asistente-com-texto" rows="6" maxlength="' + MAX_COMENTARIO + '" ' +
+      'style="padding:.5rem;border:1px solid #cbd5e1;border-radius:6px;font-size:.85rem;resize:vertical;font-family:inherit"></textarea>' +
+      '<div id="asistente-com-contador" style="font-size:.72rem;color:#64748b;text-align:right">0 / ' + MAX_COMENTARIO + "</div>" +
+      '<div id="asistente-com-estado" role="status" style="font-size:.8rem;min-height:1.1em"></div>' +
+      '<div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:auto">' +
+      '<button type="button" id="asistente-com-cancelar" style="border:1px solid #cbd5e1;background:#fff;color:#334155;padding:.4rem .8rem;border-radius:6px;cursor:pointer">Cancelar</button>' +
+      '<button type="button" id="asistente-com-enviar" style="border:0;background:#0d6efd;color:#fff;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Enviar</button>' +
+      "</div>";
+    panel.appendChild(f);
+    const texto = document.getElementById("asistente-com-texto");
+    texto.addEventListener("input", () => {
+      document.getElementById("asistente-com-contador").textContent = texto.value.length + " / " + MAX_COMENTARIO;
+    });
+    texto.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarComentarios(); });
+    document.getElementById("asistente-com-cancelar").addEventListener("click", cerrarComentarios);
+    document.getElementById("asistente-com-enviar").addEventListener("click", enviarComentario);
+  }
+
+  function estadoComentario(mensaje, ok) {
+    const e = document.getElementById("asistente-com-estado");
+    e.textContent = mensaje;
+    e.style.color = ok ? "#15803d" : "#b91c1c";
+  }
+
+  function abrirComentarios() {
+    estadoComentario("", true);
+    document.getElementById("asistente-comentarios").style.display = "flex";
+    document.getElementById("asistente-com-texto").focus();
+  }
+
+  function cerrarComentarios() {
+    document.getElementById("asistente-comentarios").style.display = "none";
+  }
+
+  async function enviarComentario() {
+    const texto = document.getElementById("asistente-com-texto");
+    const boton = document.getElementById("asistente-com-enviar");
+    const contenido = texto.value.trim();
+    if (!contenido) return estadoComentario("Escribe tu comentario antes de enviarlo.", false);
+    boton.disabled = true;
+    boton.style.opacity = ".5";
+    estadoComentario("Enviando...", true);
+    try {
+      const resp = await fetch("/asistente/comentarios", {
+        method: "POST",
+        headers: cabeceras(),
+        credentials: "same-origin",
+        body: JSON.stringify({ categoria: document.getElementById("asistente-com-categoria").value, texto: contenido }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        estadoComentario("¡Gracias! Recibimos tu comentario.", true);
+        texto.value = "";
+        document.getElementById("asistente-com-contador").textContent = "0 / " + MAX_COMENTARIO;
+        setTimeout(cerrarComentarios, 1800);
+      } else if (resp.status === 401) {
+        estadoComentario("Tu sesión caducó. Vuelve a iniciar sesión para enviar tu comentario.", false);
+      } else {
+        estadoComentario(data.detail || "No se pudo enviar tu comentario. Intenta de nuevo.", false);
+      }
+    } catch (err) {
+      estadoComentario("No se pudo enviar tu comentario. Revisa tu conexión e intenta de nuevo.", false);
+    } finally {
+      boton.disabled = false;
+      boton.style.opacity = "1";
+    }
   }
 
   function vaciar() {

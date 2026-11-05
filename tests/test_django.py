@@ -110,11 +110,45 @@ def test_apagado_no_expone_rutas():
 
 
 def test_vista_directa_con_usuario_autenticado_por_defecto():
-    chat, _ = crear_vistas(TK)
+    chat, _, _ = crear_vistas(TK)
     pedido = RequestFactory().post("/asistente/chat", data=json.dumps({"mensaje": "hola"}), content_type="application/json")
     pedido.user = SimpleNamespace(is_authenticated=False)
     pedido._dont_enforce_csrf_checks = True   # aquí se prueba solo la sesión; el CSRF ya se prueba arriba
     assert chat(pedido).status_code == 401, "por defecto exige request.user.is_authenticated"
+
+
+def _comentar(cliente, cuerpo, token=None):
+    cabeceras = {"HTTP_X_CSRFTOKEN": token} if token else {}
+    return cliente.post("/asistente/comentarios", data=json.dumps(cuerpo), content_type="application/json", **cabeceras)
+
+
+def test_comentarios_exigen_sesion_y_token_csrf_y_se_guardan():
+    import tempfile
+    from asistente_core import comentarios
+    with tempfile.TemporaryDirectory() as tmp:
+        ruta = os.path.join(tmp, "c.jsonl")
+        os.environ["ASISTENTE_COMENTARIOS_ARCHIVO"] = ruta
+        comentarios.contador = comentarios._Contador()
+        try:
+            cliente = Client(enforce_csrf_checks=True)
+            token = cliente.get("/asistente/asistente.js").cookies["csrftoken"].value
+            assert _comentar(cliente, {"texto": "hola"}).status_code == 403, "sin token debe rechazarse"
+            SESION["activa"] = False
+            try:
+                assert _comentar(cliente, {"texto": "hola"}, token).status_code == 401
+            finally:
+                SESION["activa"] = True
+            assert not os.path.exists(ruta)
+            r = _comentar(cliente, {"categoria": "error", "texto": "Una cifra no coincide."}, token)
+            assert r.status_code == 200 and r.json() == {"ok": True}
+            fila = json.loads(open(ruta, encoding="utf-8").read().splitlines()[0])
+            assert fila["comentario"] == "Una cifra no coincide." and fila["categoria"] == "error"
+            r = _comentar(cliente, {"texto": "mi RFC es ABCD800101XYZ"}, token)
+            assert r.status_code == 422 and "un RFC" in r.json()["detail"], "los RFC de los atajos se rechazan"
+            assert _comentar(cliente, {"texto": "  "}, token).status_code == 400
+            assert cliente.get("/asistente/comentarios").status_code == 405
+        finally:
+            os.environ.pop("ASISTENTE_COMENTARIOS_ARCHIVO", None)
 
 
 if __name__ == "__main__":
